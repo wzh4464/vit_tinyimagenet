@@ -123,9 +123,11 @@ def main():
     print("Preparing data loaders...")
     train_loader, val_loader = prepare_tiny_imagenet_data(extracted_dir)
 
-    print("Loading DeiT model...")
+    print("Loading DeiT Tiny model...")
     model = timm.create_model(
-        "deit_small_patch16_224", pretrained=True, num_classes=200
+        "deit_tiny_patch16_224",  # 改成 DeiT Tiny
+        pretrained=True,
+        num_classes=200,  # Tiny ImageNet 的类别数
     )
 
     # Adjust input size
