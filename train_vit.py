@@ -123,20 +123,20 @@ def main():
     print("Preparing data loaders...")
     train_loader, val_loader = prepare_tiny_imagenet_data(extracted_dir)
 
-    print("Loading DeiT Tiny model...")
+    print("Loading ViT-Tiny model...")
     model = timm.create_model(
-        "deit_tiny_patch16_224",  # 改成 DeiT Tiny
+        "vit_tiny_patch16_224",  # 改为 ViT-Tiny
         pretrained=True,
         num_classes=200,  # Tiny ImageNet 的类别数
     )
 
-    # Adjust input size
+    # Adjust input size to match Tiny ImageNet
     model.default_cfg["input_size"] = (3, 64, 64)
 
     # Update the PatchEmbed layer's img_size
     model.patch_embed.img_size = (64, 64)
 
-    # Interpolate positional encoding
+    # Interpolate positional encoding for new input size
     model = interpolate_pos_encoding(model, img_size=64).to(device)
 
     print("Starting training...")

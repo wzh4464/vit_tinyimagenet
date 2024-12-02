@@ -3,7 +3,7 @@
 # Created Date: Monday, December 2nd 2024
 # Author: Zihan
 # -----
-# Last Modified: Monday, 2nd December 2024 3:54:11 pm
+# Last Modified: Monday, 2nd December 2024 4:51:18 pm
 # Modified By: the developer formerly known as Zihan at <wzh4464@gmail.com>
 # -----
 # HISTORY:
@@ -14,6 +14,8 @@
 import os
 import requests
 import zipfile
+import torch
+import torchvision
 from torchvision import transforms, datasets
 from torch.utils.data import DataLoader
 
@@ -52,57 +54,41 @@ def download_and_extract(url, dest_dir):
 
 
 # 数据预处理和加载器
-def prepare_tiny_imagenet_data(data_dir, batch_size=64):
-    # 数据集路径
-    train_dir = os.path.join(data_dir, "train")
-    val_dir = os.path.join(data_dir, "val")
-
-    # 验证集的标签映射处理
-    val_image_dir = os.path.join(val_dir, "images")
-    val_annotations_file = os.path.join(val_dir, "val_annotations.txt")
-    if os.path.exists(val_annotations_file):
-        with open(val_annotations_file, "r") as f:
-            annotations = f.readlines()
-        annotations = [line.strip().split("\t")[:2] for line in annotations]
-        class_to_idx = {
-            cls_name: idx
-            for idx, cls_name in enumerate({ann[1] for ann in annotations})
-        }
-        val_labels = {
-            os.path.join(val_image_dir, ann[0]): class_to_idx[ann[1]]
-            for ann in annotations
-        }
-
-    # 定义数据变换
-    transform = transforms.Compose(
+def prepare_tiny_imagenet_data(data_dir):
+    train_transform = transforms.Compose(
         [
-            transforms.Resize((64, 64)),  # Tiny ImageNet 的原始大小
+            transforms.RandomResizedCrop(64),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )
 
-    # 加载数据
-    train_dataset = datasets.ImageFolder(train_dir, transform=transform)
-    val_dataset = datasets.ImageFolder(val_dir, transform=transform)
-
-    # 为验证集应用手动标签
-    if val_labels:
-        val_dataset.samples = [
-            (img_path, val_labels[img_path])
-            for img_path, _ in val_dataset.samples
-            if img_path in val_labels
+    val_transform = transforms.Compose(
+        [
+            transforms.Resize(64),
+            transforms.CenterCrop(64),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
-
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, num_workers=4
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, num_workers=4
     )
 
-    print(f"Train dataset size: {len(train_dataset)}")
-    print(f"Validation dataset size: {len(val_dataset)}")
+    train_dataset = torchvision.datasets.ImageFolder(
+        root=os.path.join(data_dir, "train"), transform=train_transform
+    )
+    val_dataset = torchvision.datasets.ImageFolder(
+        root=os.path.join(data_dir, "val"), transform=val_transform
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=64, shuffle=True, num_workers=4
+    )
+    val_loader = torch.utils.data.DataLoader(
+        val_dataset, batch_size=64, shuffle=False, num_workers=4
+    )
+
     return train_loader, val_loader
 
 
