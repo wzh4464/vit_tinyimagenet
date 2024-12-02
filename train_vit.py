@@ -74,11 +74,13 @@ print(f"Using device: {device}")
 def train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.001):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+    total_steps = len(train_loader)
 
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
-        for images, labels in train_loader:
+        for step, (images, labels) in enumerate(train_loader):
             images, labels = images.to(device), labels.to(device)
 
             # 前向传播
@@ -90,15 +92,27 @@ def train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.
             loss.backward()
             optimizer.step()
 
+            # 调整学习率
+            scheduler.step()
+
             running_loss += loss.item()
 
+            if step % 20 == 0:
+                print(
+                    f"Epoch [{epoch+1}/{num_epochs}], Step [{step+1}/{len(train_loader)}], "
+                    f"Loss: {running_loss / (step + 1):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}"
+                )
+
+        # 每个 epoch 打印一次平均损失
+        avg_loss = running_loss / total_steps
         print(
-            f"Epoch [{epoch+1}/{num_epochs}], Loss: {running_loss/len(train_loader):.4f}"
+            f"Epoch [{epoch+1}/{num_epochs}] completed with Average Loss: {avg_loss:.4f}"
         )
 
-        # 验证
+        # 在每个 epoch 结束时验证模型
         validate_model(model, val_loader)
 
+    # 保存模型
     torch.save(model.state_dict(), "./tiny_vit_tiny_imagenet.pth")
     print("Model saved successfully!")
 
@@ -108,6 +122,8 @@ def validate_model(model, val_loader):
     model.eval()
     correct = 0
     total = 0
+    val_loss = 0.0
+    criterion = nn.CrossEntropyLoss()
     with torch.no_grad():
         for images, labels in val_loader:
             images, labels = images.to(device), labels.to(device)
@@ -116,7 +132,14 @@ def validate_model(model, val_loader):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
-    print(f"Validation Accuracy: {100 * correct / total:.2f}%")
+            # 计算验证损失
+            val_loss += criterion(outputs, labels).item()
+
+        avg_val_loss = val_loss / len(val_loader)
+        print(
+            f"Validation Accuracy: {100 * correct / total:.2f}%, "
+            f"Validation Loss: {avg_val_loss:.4f}"
+        )
 
 
 # 主函数
@@ -131,7 +154,7 @@ def main():
     model = TinyViT(num_classes=200).to(device)
 
     print("Starting training...")
-    train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.001)
+    train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.0001)
 
 
 if __name__ == "__main__":
