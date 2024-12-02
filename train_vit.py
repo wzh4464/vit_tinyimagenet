@@ -12,6 +12,48 @@ from torchvision.models.vision_transformer import Encoder
 import torch.nn.functional as F
 
 
+class WarmupCosineScheduler:
+    def __init__(
+        self,
+        optimizer,
+        warmup_epochs,
+        total_epochs,
+        total_steps_per_epoch,
+        warmup_start_lr=1e-6,
+        base_lr=1e-3,
+    ):
+        self.optimizer = optimizer
+        self.warmup_epochs = warmup_epochs
+        self.total_epochs = total_epochs
+        self.total_steps_per_epoch = total_steps_per_epoch
+        self.warmup_steps = warmup_epochs * total_steps_per_epoch
+        self.total_steps = total_epochs * total_steps_per_epoch
+        self.warmup_start_lr = warmup_start_lr
+        self.base_lr = base_lr
+        self.current_step = 0
+
+    def step(self):
+        self.current_step += 1
+        if self.current_step <= self.warmup_steps:
+            # 线性 warm up
+            lr = self.warmup_start_lr + (self.base_lr - self.warmup_start_lr) * (
+                self.current_step / self.warmup_steps
+            )
+        else:
+            # cosine decay
+            progress = (self.current_step - self.warmup_steps) / (
+                self.total_steps - self.warmup_steps
+            )
+            lr = self.base_lr * 0.5 * (1 + math.cos(math.pi * progress))
+
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = lr
+        return lr
+
+    def get_last_lr(self):
+        return [group["lr"] for group in self.optimizer.param_groups]
+
+
 class TinyViT(nn.Module):
     def __init__(
         self,
@@ -37,7 +79,7 @@ class TinyViT(nn.Module):
         )
         self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim))
         self.pos_embed = nn.Parameter(
-            torch.zeros(1, self.num_patches + 1, self.embed_dim)
+            torch.randn(1, self.num_patches + 1, self.embed_dim) * 0.02
         )
 
         # Transformer Encoder
@@ -74,7 +116,17 @@ print(f"Using device: {device}")
 def train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.001):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+
+    # 创建带 warm-up 的调度器
+    scheduler = WarmupCosineScheduler(
+        optimizer,
+        warmup_epochs=5,  # 预热5个epoch
+        total_epochs=num_epochs,
+        total_steps_per_epoch=len(train_loader),
+        warmup_start_lr=1e-6,
+        base_lr=learning_rate,
+    )
+
     total_steps = len(train_loader)
 
     for epoch in range(num_epochs):
@@ -93,28 +145,24 @@ def train_model(model, train_loader, val_loader, num_epochs=20, learning_rate=0.
             optimizer.step()
 
             # 调整学习率
-            scheduler.step()
+            current_lr = scheduler.step()
 
             running_loss += loss.item()
 
             if step % 20 == 0:
                 print(
-                    f"Epoch [{epoch+1}/{num_epochs}], Step [{step+1}/{len(train_loader)}], "
-                    f"Loss: {running_loss / (step + 1):.4f}, LR: {scheduler.get_last_lr()[0]:.6f}"
+                    f"Epoch [{epoch+1}/{num_epochs}], Step [{step+1}/{total_steps}], "
+                    f"Loss: {running_loss / (step + 1):.4f}, LR: {current_lr:.6f}"
                 )
 
-        # 每个 epoch 打印一次平均损失
+        # 每个 epoch 打印平均损失
         avg_loss = running_loss / total_steps
         print(
             f"Epoch [{epoch+1}/{num_epochs}] completed with Average Loss: {avg_loss:.4f}"
         )
 
-        # 在每个 epoch 结束时验证模型
+        # 验证
         validate_model(model, val_loader)
-
-    # 保存模型
-    torch.save(model.state_dict(), "./tiny_vit_tiny_imagenet.pth")
-    print("Model saved successfully!")
 
 
 # 验证函数
